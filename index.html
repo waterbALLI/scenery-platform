@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f1d1b" />
+    <title>云岭森林公园 | WebGL 图形学演示</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene-canvas"></canvas>
+      <header class="topbar">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div>
+          <p class="eyebrow">WEBGL FIELD STUDY 01</p>
+          <h1>云岭森林公园</h1>
+        </div>
+        <div class="topbar-meta">
+          <span class="live-dot"></span>
+          <span>实时渲染</span>
+          <span class="divider"></span>
+          <span id="clock-readout">12:00</span>
+        </div>
+      </header>
+
+      <aside class="control-panel" aria-label="场景控制面板">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">SCENE CONTROL</p>
+            <h2>观景台</h2>
+          </div>
+          <button id="panel-toggle" class="icon-button" title="收起控制面板" aria-label="收起控制面板">−</button>
+        </div>
+
+        <div class="panel-content">
+          <section class="control-section">
+            <div class="section-title"><span class="section-index">01</span><span>时间与天气</span></div>
+            <label class="control-row">
+              <span>时间</span>
+              <output id="time-value">12:00</output>
+            </label>
+            <input id="time-slider" class="range" type="range" min="0" max="24" step="0.05" value="12" />
+            <div class="range-labels"><span>日出 06:00</span><span>日落 18:00</span></div>
+            <div class="segmented" id="weather-options" role="group" aria-label="天气选择">
+              <button data-weather="clear" class="segment active">晴朗</button>
+              <button data-weather="rain" class="segment">细雨</button>
+              <button data-weather="snow" class="segment">初雪</button>
+            </div>
+          </section>
+
+          <section class="control-section">
+            <div class="section-title"><span class="section-index">02</span><span>算法实验</span></div>
+            <label class="control-row"><span>地形起伏</span><output id="terrain-value">1.00</output></label>
+            <input id="terrain-slider" class="range" type="range" min="0.4" max="1.6" step="0.05" value="1" />
+            <label class="control-row"><span>湖面波速</span><output id="water-value">1.00</output></label>
+            <input id="water-slider" class="range" type="range" min="0.2" max="2.4" step="0.1" value="1" />
+            <label class="control-row"><span>粒子密度</span><output id="particle-value">620</output></label>
+            <input id="particle-slider" class="range" type="range" min="120" max="1200" step="20" value="620" />
+          </section>
+
+          <section class="control-section">
+            <div class="section-title"><span class="section-index">03</span><span>调试图层</span></div>
+            <label class="switch-row"><span>显示地形网格</span><input id="wireframe-toggle" type="checkbox" /><span class="switch"></span></label>
+            <label class="switch-row"><span>显示贝塞尔路径</span><input id="path-toggle" type="checkbox" checked /><span class="switch"></span></label>
+            <label class="switch-row"><span>显示碰撞范围</span><input id="collision-toggle" type="checkbox" /><span class="switch"></span></label>
+          </section>
+
+          <section class="control-section compact-section">
+            <div class="section-title"><span class="section-index">04</span><span>视角</span></div>
+            <div class="view-actions">
+              <button id="reset-camera" class="action-button"><span class="button-icon">↺</span>重置视角</button>
+              <button id="camera-mode" class="action-button"><span class="button-icon">◉</span><span id="camera-mode-label">漫游模式</span></button>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <div class="status-card">
+        <div class="status-row"><span class="status-label">当前位置</span><strong id="location-readout">湖畔观景台</strong></div>
+        <div class="status-divider"></div>
+        <div class="status-metrics"><div><span>FPS</span><strong id="fps-readout">60</strong></div><div><span>物体</span><strong id="object-readout">0</strong></div><div><span>模式</span><strong id="mode-readout">漫游</strong></div></div>
+      </div>
+
+      <div class="hint-bar"><span class="key-hint">W A S D</span><span>移动</span><span class="key-hint">鼠标</span><span>环视</span><span class="key-hint">Shift</span><span>加速</span><span class="key-hint">F</span><span>切换视角</span></div>
+      <div class="toast" id="toast" role="status"></div>
+      <div class="loading-screen" id="loading-screen"><div class="loading-inner"><div class="loading-ring"></div><p>正在生成云岭地形</p><span>程序化场景初始化中</span></div></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
