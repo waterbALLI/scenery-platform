@@ -25,14 +25,17 @@ orbit.enableDamping = true;
 orbit.target.set(0, 5, 0);
 orbit.maxPolarAngle = Math.PI * 0.47;
 orbit.minDistance = 10;
-orbit.maxDistance = 90;
+orbit.maxDistance = 150;
 orbit.enabled = true;
 
 const pointer = new PointerLockControls(camera, renderer.domElement);
 pointer.pointerSpeed = 0.6;
 let roamMode = false;
+let overviewMode = false;
 let timeOfDay = 12;
 let terrainScale = 1;
+let terrainSegments = 70;
+let terrainAlgorithm = 'waves';
 let waterSpeed = 1;
 let weatherType = 'clear';
 let particleTarget = 620;
@@ -40,6 +43,11 @@ let elapsed = 0;
 const clock = new THREE.Clock();
 const keys = {};
 const objects = [];
+const treeAnchors = [];
+const sceneryAnchors = [];
+const collisionRecords = [];
+const MAP_SIZE = 220;
+const MAP_HALF = MAP_SIZE / 2;
 
 const world = new THREE.Group();
 scene.add(world);
@@ -58,18 +66,73 @@ const colors = {
   sun: 0xffd9a0,
 };
 
-function terrainHeight(x, z) {
+function hash2D(x, z) {
+  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function fade(t) {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function gradientNoise(x, z) {
+  const x0 = Math.floor(x); const z0 = Math.floor(z);
+  const fx = x - x0; const fz = z - z0;
+  const grad = (ix, iz, dx, dz) => {
+    const angle = hash2D(ix, iz) * Math.PI * 2;
+    return (Math.cos(angle) * dx + Math.sin(angle) * dz);
+  };
+  const u = fade(fx); const v = fade(fz);
+  const n00 = grad(x0, z0, fx, fz);
+  const n10 = grad(x0 + 1, z0, fx - 1, fz);
+  const n01 = grad(x0, z0 + 1, fx, fz - 1);
+  const n11 = grad(x0 + 1, z0 + 1, fx - 1, fz - 1);
+  return THREE.MathUtils.lerp(THREE.MathUtils.lerp(n00, n10, u), THREE.MathUtils.lerp(n01, n11, u), v) * 1.75;
+}
+
+function perlinNoise(x, z) {
+  let value = 0;
+  let amplitude = 1;
+  let frequency = 0.045;
+  let total = 0;
+  for (let octave = 0; octave < 4; octave++) {
+    value += gradientNoise(x * frequency, z * frequency) * amplitude;
+    total += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2;
+  }
+  return value / total;
+}
+
+function wavesHeight(x, z) {
   const broad = Math.sin(x * 0.055 + 0.7) * 3.8 + Math.cos(z * 0.072) * 3.2;
   const ridge = Math.sin((x + z) * 0.115) * 1.4 + Math.cos((x - z) * 0.16) * 0.9;
   const detail = Math.sin(x * 0.31) * Math.cos(z * 0.23) * 0.36;
   const lakeBasin = Math.max(0, 1 - Math.hypot(x + 1, z + 7) / 21);
-  return (broad + ridge + detail - lakeBasin * 7) * terrainScale + 3.5;
+  return broad + ridge + detail - lakeBasin * 7;
+}
+
+function erosionHeight(x, z) {
+  const base = perlinNoise(x, z) * 15;
+  const left = perlinNoise(x - 4, z);
+  const right = perlinNoise(x + 4, z);
+  const up = perlinNoise(x, z - 4);
+  const down = perlinNoise(x, z + 4);
+  const slope = Math.abs(left - right) + Math.abs(up - down);
+  const valley = Math.max(0, 1 - Math.hypot(x + 1, z + 7) / 30) * 5.5;
+  return base - slope * 5.5 - valley + Math.sin(x * 0.08 + z * 0.04) * 0.55;
+}
+
+function terrainHeight(x, z) {
+  let height;
+  if (terrainAlgorithm === 'perlin') height = perlinNoise(x, z) * 15;
+  else if (terrainAlgorithm === 'erosion') height = erosionHeight(x, z);
+  else height = wavesHeight(x, z);
+  return height * terrainScale + 3.5;
 }
 
 function createTerrain() {
-  const size = 150;
-  const segments = 70;
-  const geo = new THREE.PlaneGeometry(size, size, segments, segments);
+  const geo = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, terrainSegments, terrainSegments);
   geo.rotateX(-Math.PI / 2);
   const position = geo.attributes.position;
   const colorsAttr = [];
@@ -131,6 +194,7 @@ const lake = createLake();
 
 function createTree(x, z, scale = 1, hue = 0.31) {
   const group = new THREE.Group();
+  group.userData.terrainAnchor = { x, z };
   group.position.set(x, terrainHeight(x, z), z);
   group.scale.setScalar(scale);
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 3.4, 7), new THREE.MeshStandardMaterial({ color: 0x72543d, roughness: 1 }));
@@ -148,6 +212,7 @@ function createTree(x, z, scale = 1, hue = 0.31) {
   group.add(crown2);
   sceneryGroup.add(group);
   objects.push(group);
+  treeAnchors.push(group);
 }
 
 function seedTrees() {
@@ -155,6 +220,9 @@ function seedTrees() {
     [-47, -37, 1.5], [-39, -20, 1.2], [-45, 4, 1.4], [-35, 26, 1.3], [-24, 35, 1.5],
     [25, -38, 1.5], [39, -23, 1.3], [46, -4, 1.6], [38, 19, 1.3], [28, 37, 1.5],
     [-12, 37, 1.1], [13, 39, 1.2], [-49, 27, 1.2], [48, 34, 1.15], [32, -3, 1.0],
+    [-83, -64, 1.25], [-61, -78, 1.05], [-19, -83, 1.35], [20, -81, 1.2], [64, -73, 1.28],
+    [84, -47, 1.1], [88, 2, 1.35], [80, 51, 1.2], [56, 79, 1.3], [6, 84, 1.15],
+    [-45, 79, 1.2], [-82, 61, 1.3], [-89, 22, 1.1], [-83, -7, 1.25],
   ];
   spots.forEach(([x, z, s], i) => createTree(x, z, s, 0.28 + (i % 3) * 0.02));
 }
@@ -163,19 +231,25 @@ seedTrees();
 const woodMat = new THREE.MeshStandardMaterial({ color: 0x967052, roughness: 0.82 });
 const roofMat = new THREE.MeshStandardMaterial({ color: 0x263d37, roughness: 0.88 });
 const creamMat = new THREE.MeshStandardMaterial({ color: 0xd8c5a0, roughness: 0.8 });
-addBox('cabin-body', [17, terrainHeight(17, 13) + 2.3, 13], [7, 4.6, 5.8], woodMat);
+const cabinAnchor = { x: 17, z: 13 };
+const cabinBaseY = () => terrainHeight(cabinAnchor.x, cabinAnchor.z);
+const cabinBody = addBox('cabin-body', [17, cabinBaseY() + 2.3, 13], [7, 4.6, 5.8], woodMat);
+sceneryAnchors.push({ object: cabinBody, anchor: cabinAnchor, offsetY: 2.3 });
 const cabinRoof = new THREE.Mesh(new THREE.ConeGeometry(5.6, 2.5, 4), roofMat);
 cabinRoof.rotation.y = Math.PI / 4;
-cabinRoof.position.set(17, terrainHeight(17, 13) + 5.8, 13);
+cabinRoof.position.set(17, cabinBaseY() + 5.8, 13);
 cabinRoof.scale.z = 0.58;
 cabinRoof.castShadow = true;
 sceneryGroup.add(cabinRoof);
-addBox('cabin-window', [14.45, terrainHeight(14, 13) + 2.6, 10.03], [1.2, 1.25, 0.12], creamMat, { castShadow: false });
-addBox('cabin-window', [19.55, terrainHeight(20, 13) + 2.6, 10.03], [1.2, 1.25, 0.12], creamMat, { castShadow: false });
+sceneryAnchors.push({ object: cabinRoof, anchor: cabinAnchor, offsetY: 5.8 });
+const cabinWindowA = addBox('cabin-window', [14.45, cabinBaseY() + 2.6, 10.03], [1.2, 1.25, 0.12], creamMat, { castShadow: false });
+const cabinWindowB = addBox('cabin-window', [19.55, cabinBaseY() + 2.6, 10.03], [1.2, 1.25, 0.12], creamMat, { castShadow: false });
+sceneryAnchors.push({ object: cabinWindowA, anchor: cabinAnchor, offsetY: 2.6, fixedPosition: [14.45, 10.03] });
+sceneryAnchors.push({ object: cabinWindowB, anchor: cabinAnchor, offsetY: 2.6, fixedPosition: [19.55, 10.03] });
 
 function createPath() {
   const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-22, 2.2, 30), new THREE.Vector3(-10, 1.6, 20), new THREE.Vector3(-4, 1.3, 8), new THREE.Vector3(-12, 1.4, -2), new THREE.Vector3(-1, 1.4, -20),
+    new THREE.Vector3(-22, terrainHeight(-22, 30) + 0.18, 30), new THREE.Vector3(-10, terrainHeight(-10, 20) + 0.18, 20), new THREE.Vector3(-4, terrainHeight(-4, 8) + 0.18, 8), new THREE.Vector3(-12, terrainHeight(-12, -2) + 0.18, -2), new THREE.Vector3(-1, terrainHeight(-1, -20) + 0.18, -20),
   ]);
   const points = curve.getPoints(90);
   const pathGeo = new THREE.BufferGeometry().setFromPoints(points);
@@ -189,6 +263,14 @@ function createPath() {
 }
 const path = createPath();
 
+function rebuildPathHeight() {
+  const positions = path.curve.getPoints(4);
+  positions.forEach((point) => { point.y = terrainHeight(point.x, point.z) + 0.18; });
+  path.curve.points = positions;
+  pathGroup.getObjectByName('bezier-observation-path').geometry.dispose();
+  pathGroup.getObjectByName('bezier-observation-path').geometry = new THREE.BufferGeometry().setFromPoints(path.curve.getPoints(90));
+}
+
 const collisionBoxes = [];
 function addCollisionBox(pos, size) {
   const box = new THREE.Box3(new THREE.Vector3(pos[0] - size[0] / 2, pos[1] - size[1] / 2, pos[2] - size[2] / 2), new THREE.Vector3(pos[0] + size[0] / 2, pos[1] + size[1] / 2, pos[2] + size[2] / 2));
@@ -196,8 +278,26 @@ function addCollisionBox(pos, size) {
   const helper = new THREE.Box3Helper(box, 0xffb26d);
   helper.visible = false;
   debugGroup.add(helper);
+  collisionRecords.push({ box, helper, anchor: cabinAnchor, size });
 }
-addCollisionBox([17, terrainHeight(17, 13) + 2.4, 13], [7.2, 5, 6]);
+addCollisionBox([17, cabinBaseY() + 2.4, 13], [7.2, 5, 6]);
+
+function updateSceneryHeightAnchors() {
+  treeAnchors.forEach((tree) => {
+    const { x, z } = tree.userData.terrainAnchor;
+    tree.position.y = terrainHeight(x, z);
+  });
+  sceneryAnchors.forEach(({ object, anchor, offsetY, fixedPosition }) => {
+    object.position.y = terrainHeight(anchor.x, anchor.z) + offsetY;
+    if (fixedPosition) { object.position.x = fixedPosition[0]; object.position.z = fixedPosition[1]; }
+  });
+  collisionRecords.forEach(({ box, helper, anchor, size }) => {
+    const y = terrainHeight(anchor.x, anchor.z) + 2.4;
+    box.min.set(anchor.x - size[0] / 2, y - size[1] / 2, anchor.z - size[2] / 2);
+    box.max.set(anchor.x + size[0] / 2, y + size[1] / 2, anchor.z + size[2] / 2);
+    helper.box = box;
+  });
+}
 
 const ambient = new THREE.HemisphereLight(0xc9dfdb, 0x334239, 1.25);
 scene.add(ambient);
@@ -205,7 +305,7 @@ const sun = new THREE.DirectionalLight(colors.sun, 3.2);
 sun.position.set(-30, 42, 25);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -70; sun.shadow.camera.right = 70; sun.shadow.camera.top = 70; sun.shadow.camera.bottom = -70;
+sun.shadow.camera.left = -120; sun.shadow.camera.right = 120; sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
 scene.add(sun);
 const moon = new THREE.DirectionalLight(0x85a9d1, 0);
 moon.position.set(20, 30, -30);
@@ -275,7 +375,7 @@ function updatePath() {
 }
 
 function updateRoaming(dt) {
-  if (!roamMode) return;
+  if (!roamMode || overviewMode) return;
   const direction = new THREE.Vector3(Number(keys.KeyD) - Number(keys.KeyA), 0, Number(keys.KeyS) - Number(keys.KeyW));
   if (!direction.lengthSq()) return;
   direction.normalize().applyQuaternion(camera.quaternion);
@@ -284,7 +384,7 @@ function updateRoaming(dt) {
   const next = camera.position.clone().addScaledVector(direction, speed * dt * 60);
   next.y = terrainHeight(next.x, next.z) + 7.2;
   const hit = collisionBoxes.some((box) => box.distanceToPoint(next) < 2.6);
-  if (!hit && Math.abs(next.x) < 68 && Math.abs(next.z) < 65) camera.position.copy(next);
+  if (!hit && Math.abs(next.x) < MAP_HALF - 8 && Math.abs(next.z) < MAP_HALF - 8) camera.position.copy(next);
 }
 
 function setToast(message) {
@@ -305,14 +405,17 @@ function bindUI() {
   const timeSlider = document.querySelector('#time-slider');
   timeSlider.addEventListener('input', () => { timeOfDay = Number(timeSlider.value); const text = formatHour(timeOfDay); document.querySelector('#time-value').textContent = text; document.querySelector('#clock-readout').textContent = text; });
   document.querySelector('#terrain-slider').addEventListener('input', (e) => { terrainScale = Number(e.target.value); document.querySelector('#terrain-value').textContent = terrainScale.toFixed(2); rebuildTerrain(); });
+  document.querySelector('#terrain-algorithm').addEventListener('change', (e) => { terrainAlgorithm = e.target.value; rebuildTerrain(); setToast(`地形算法已切换为${e.target.options[e.target.selectedIndex].text}`); });
+  document.querySelector('#terrain-density').addEventListener('change', (e) => { terrainSegments = Number(e.target.value); rebuildTerrain(); setToast(`网格密度已调整为${terrainSegments}×${terrainSegments}`); });
   document.querySelector('#water-slider').addEventListener('input', (e) => { waterSpeed = Number(e.target.value); lake.material.uniforms.uSpeed.value = waterSpeed; document.querySelector('#water-value').textContent = waterSpeed.toFixed(2); });
   document.querySelector('#particle-slider').addEventListener('input', (e) => { particleTarget = Number(e.target.value); document.querySelector('#particle-value').textContent = particleTarget; });
   document.querySelectorAll('[data-weather]').forEach((button) => button.addEventListener('click', () => { weatherType = button.dataset.weather; document.querySelectorAll('[data-weather]').forEach((b) => b.classList.toggle('active', b === button)); setToast(`天气已切换为${button.textContent}`); }));
   document.querySelector('#wireframe-toggle').addEventListener('change', (e) => terrain.wire.visible = e.target.checked);
   document.querySelector('#path-toggle').addEventListener('change', updatePath);
   document.querySelector('#collision-toggle').addEventListener('change', (e) => debugGroup.children.filter((child) => child.type === 'Box3Helper').forEach((helper) => helper.visible = e.target.checked));
-  document.querySelector('#reset-camera').addEventListener('click', () => { camera.position.set(38, 18, 48); orbit.target.set(0, 5, 0); orbit.update(); setToast('已回到湖畔观景台'); });
+  document.querySelector('#reset-camera').addEventListener('click', () => { overviewMode = false; roamMode = false; orbit.enabled = true; camera.position.set(38, 18, 48); orbit.target.set(0, 5, 0); orbit.update(); document.querySelector('#mode-readout').textContent = '漫游'; document.querySelector('#camera-mode-label').textContent = '漫游模式'; setToast('已回到湖畔观景台'); });
   document.querySelector('#camera-mode').addEventListener('click', toggleCameraMode);
+  document.querySelector('#overview-camera').addEventListener('click', setOverviewCamera);
   document.querySelector('#panel-toggle').addEventListener('click', () => { document.querySelector('.control-panel').classList.toggle('collapsed'); document.querySelector('#panel-toggle').textContent = document.querySelector('.control-panel').classList.contains('collapsed') ? '+' : '−'; });
   window.addEventListener('keydown', (e) => { keys[e.code] = true; if (e.code === 'KeyF') toggleCameraMode(); });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -320,12 +423,26 @@ function bindUI() {
 }
 
 function toggleCameraMode() {
+  overviewMode = false;
   roamMode = !roamMode;
   orbit.enabled = !roamMode;
   document.querySelector('#camera-mode-label').textContent = roamMode ? '观察模式' : '漫游模式';
   document.querySelector('#mode-readout').textContent = roamMode ? '自由' : '漫游';
   if (!roamMode && pointer.isLocked) pointer.unlock();
   setToast(roamMode ? '已进入第一人称漫游，点击画面锁定鼠标' : '已回到轨道观察模式');
+}
+
+function setOverviewCamera() {
+  overviewMode = true;
+  roamMode = false;
+  orbit.enabled = true;
+  if (pointer.isLocked) pointer.unlock();
+  camera.position.set(0, 112, 128);
+  orbit.target.set(0, 0, 0);
+  orbit.update();
+  document.querySelector('#camera-mode-label').textContent = '漫游模式';
+  document.querySelector('#mode-readout').textContent = '俯视';
+  setToast('已切换至高空倾角俯视视角');
 }
 
 function rebuildTerrain() {
@@ -336,10 +453,16 @@ function rebuildTerrain() {
   const freshWireGeometry = fresh.wire.geometry;
   terrainGroup.remove(fresh.mesh);
   debugGroup.remove(fresh.wire);
+  terrain.mesh.material.dispose();
+  terrain.wire.material.dispose();
   old.geometry.dispose();
   old.geometry = freshGeometry;
   oldWire.geometry.dispose();
   oldWire.geometry = freshWireGeometry;
+  terrain.mesh.material = fresh.mesh.material;
+  terrain.wire.material = fresh.wire.material;
+  updateSceneryHeightAnchors();
+  rebuildPathHeight();
 }
 
 bindUI();
