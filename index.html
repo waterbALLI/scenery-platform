@@ -50,7 +50,7 @@
 
           <section class="control-section">
             <div class="section-title"><span class="section-index">02</span><span>算法实验</span></div>
-            <label class="control-row select-row"><span>地形算法</span><select id="terrain-algorithm" class="select-control"><option value="waves">波纹高度场</option><option value="perlin">柏林噪声</option><option value="erosion">侵蚀地形</option></select></label>
+            <label class="control-row select-row"><span>地形算法</span><select id="terrain-algorithm" class="select-control"><option value="waves">波纹高度场</option><option value="perlin">柏林噪声</option><option value="erosion">侵蚀地形</option><option value="ridged">山脊分形噪声</option><option value="domain">域扭曲噪声</option></select></label>
             <label class="control-row select-row"><span>网格密度</span><select id="terrain-density" class="select-control"><option value="45">低 · 45×45</option><option value="70" selected>中 · 70×70</option><option value="100">高 · 100×100</option><option value="130">极高 · 130×130</option></select></label>
             <label class="control-row"><span>地形起伏</span><output id="terrain-value">1.00</output></label>
             <input id="terrain-slider" class="range" type="range" min="0.4" max="1.6" step="0.05" value="1" />
@@ -86,7 +86,7 @@
 
       <div class="hint-bar"><span class="key-hint">W A S D</span><span>移动</span><span class="key-hint">鼠标</span><span>环视</span><span class="key-hint">Shift</span><span>加速</span><span class="key-hint">F</span><span>切换视角</span></div>
       <div class="toast" id="toast" role="status"></div>
-      <div class="loading-screen" id="loading-screen"><div class="loading-inner"><div class="loading-ring"></div><p>正在生成云岭地形</p><span>程序化场景初始化中</span></div></div>
+      <div class="loading-screen" id="loading-screen"><div class="loading-inner"><div class="loading-ring"></div><p>正在加载周围地形</p><span>流式地形块与水文系统初始化中</span></div></div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
